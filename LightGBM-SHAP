@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jul  2 15:12:42 2024
+
+@author: ll
+"""
+
+import lightgbm
+from sklearn.model_selection import train_test_split, KFold, cross_val_score, RandomizedSearchCV
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error
+import pandas as pd
+import shap
+import matplotlib.pyplot as plt
+import numpy as np
+
+# 初始化 SHAP 可视化
+shap.initjs()
+
+# 读取数据
+filename = 'iris.data.csv'
+names = ['CO', 'NO2', 'O3', 'PM10', 'PM2.5', 'SO2', 'AQI']
+data = pd.read_csv(filename, names=names)
+array = data.values
+
+# 分割特征和标签
+X = array[:, 0:6]
+Y = array[:, 6]
+
+# 设置随机种子和测试集大小
+seed = 99
+test_size = 0.2
+train_X, test_X, train_Y, test_Y = train_test_split(X, Y, test_size=test_size, random_state=seed)
+
+# 设置交叉验证
+num_folds = 10
+kfold = KFold(n_splits=num_folds, random_state=seed, shuffle=True)
+
+# 创建lightgbm模型
+model = lightgbm.LGBMRegressor(random_state=seed)
+
+# 设置参数分布
+param_grid = {
+    'n_estimators': range(101, 1600, 10),  # num_tree 的范围
+    'learning_rate': [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+}
+
+# 创建随机搜索对象，并指定自定义损失函数
+random_search = RandomizedSearchCV(estimator=model, param_distributions=param_grid, n_iter=10,
+                                   scoring='neg_root_mean_squared_error', cv=kfold)
+
+# 在训练集上进行随机搜索
+random_search.fit(train_X, train_Y)
+
+# 输出最佳参数组合和对应的 RMSE
+print("最佳参数组合：", random_search.best_params_)
+print("最佳 RMSE：", abs(random_search.best_score_))
+
+# 在测试集上评估最佳模型
+best_model = random_search.best_estimator_
+predictions = best_model.predict(test_X)
+test_rmse = mean_squared_error(test_Y, predictions, squared=False)
+
+# 在训练集上进行交叉验证并评估模型性能
+scores_rmse = -cross_val_score(best_model, train_X, train_Y, cv=kfold, scoring='neg_root_mean_squared_error')
+scores_mae = -cross_val_score(best_model, train_X, train_Y, cv=kfold, scoring='neg_mean_absolute_error')
+scores_r2 = cross_val_score(best_model, train_X, train_Y, cv=kfold, scoring='r2')
+
+print("交叉验证结果：")
+print("RMSE:", scores_rmse.mean())
+print("MAE:", scores_mae.mean())
+print("R²:", scores_r2.mean())
+
+# 在训练集上评估模型性能
+best_model.fit(train_X, train_Y)
+train_predictions = best_model.predict(train_X)
+
+# 创建包含拟合值和真实值的数据框
+df_train = pd.DataFrame({'真实值': train_Y, '拟合值': train_predictions})
+
+# 将数据框保存为Excel文件
+df_train.to_excel('predictions_train.xlsx', index=False)
+
+# 在测试集上评估模型性能
+test_predictions = best_model.predict(test_X)
+test_rmse = mean_squared_error(test_Y, test_predictions, squared=False)
+test_mae = mean_absolute_error(test_Y, test_predictions)
+test_r2 = r2_score(test_Y, test_predictions)
+test_mape = mean_absolute_percentage_error(test_Y, test_predictions)
+
+print("测试集结果：")
+print("RMSE:", test_rmse)
+print("MAE:", test_mae)
+print("R²:", test_r2)
+print("MAPE:", test_mape)
+
+# 创建包含拟合值和真实值的数据框
+df_test = pd.DataFrame({'真实值': test_Y, '拟合值': test_predictions})
+
+# 将数据框保存为Excel文件
+df_test.to_excel('predictions_test.xlsx', index=False)
+
+# 计算并可视化 SHAP 值
+explainer = shap.Explainer(best_model)
+shap_values = explainer.shap_values(X)  # 传入特征矩阵 X，计算 SHAP 值
+feature_names = ['CO', 'NO2', 'O3', 'PM10', 'PM2.5', 'SO2']
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["figure.dpi"] = 200
+
+# 决策图，局部可解释性
+shap.decision_plot(explainer.expected_value, shap_values[100:120, :], feature_names=feature_names)
+
+# 全局可解释性
+shap.summary_plot(shap_values, X, feature_names=feature_names)  # 可视化SHAP值分布
+shap.summary_plot(shap_values, X, plot_type="bar", feature_names=feature_names)
+
+# 特征依赖
+feature_index = 0  # 要分析的特征的索引
+shap.dependence_plot(feature_index, shap_values, X, feature_names=feature_names, interaction_index=None, show=False)
+shap.dependence_plot("CO", shap_values, X, interaction_index='NO2', feature_names=feature_names)
+shap.dependence_plot("CO", shap_values, X, interaction_index='SO2', feature_names=feature_names)
+
+# 各个特征交互
+shap_interaction_values = explainer.shap_interaction_values(X)
+feature_names=np.array(feature_names)
+shap.summary_plot(shap_interaction_values, X,feature_names=feature_names)
