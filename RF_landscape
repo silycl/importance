@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+import math
+from sklearn import preprocessing
+
+
+
+#读取数据
+csv_data = pd.read_csv('E:\\landscape_UHI\\global\\SUHI-UF\\图11-多元回归.csv')
+npdata=np.array(csv_data)
+
+#因变量
+den=npdata[:,1]           #day
+# den=npdata[:,2]           #night
+
+inden=npdata[:,3:19]
+
+'''
+#自变量
+length=len(den)
+all_pop=np.array([0])
+all_area=np.array([0])
+for m in range(0,length,1):
+    pop=math.pow(10, npdata[m,15])
+    area=math.pow(10, npdata[m,16])
+    all_pop=np.vstack((all_pop,pop))
+    all_area=np.vstack((all_area,area))
+all_pop=np.delete(all_pop,0,0)  
+all_area=np.delete(all_area,0,0) 
+inden=npdata[:,[3,4,5,6,7,8,9,10,11,12,13,14]]
+inden=np.hstack((inden,all_pop,all_area))
+'''
+
+#inden=npdata[:,[5,6,8,9,11,12,16,19,22,25,30,33,36,39]]
+#inden=np.hstack((npdata[:,[3]],npdata[:,5:21]))
+
+#inden=np.hstack((npdata[:,[5]],npdata[:,7:21]))
+#inden=npdata[:,[5,8,18]]
+#inden=npdata[:,13:21]
+#inden=np.hstack((npdata[:,[5,6,7,9,10,12]],npdata[:,13:21]))
+
+#inden=np.hstack((npdata[:,[3]],npdata[:,7:13]))
+
+Xtrain,Xtest,Ytrain,Ytest=train_test_split(inden,den,test_size=0.2,random_state=0)
+
+#创建转换器并生成规则(极差标准化，为了统一量纲和取值范围)
+x_std_transformer=preprocessing.MinMaxScaler().fit(Xtrain)
+Xtrain=x_std_transformer.transform(Xtrain)
+Xtest=x_std_transformer.transform(Xtest)
+
+y_std_transformer=preprocessing.MinMaxScaler().fit(Ytrain.reshape(-1, 1))
+Ytrain=y_std_transformer.transform(Ytrain.reshape(-1, 1))
+Ytest=y_std_transformer.transform(Ytest.reshape(-1, 1))
+
+
+#模型调参
+param_n_estimators = {'n_estimators':range(100,300,100),'min_samples_leaf':range(1,4,1)}
+#,'min_samples_leaf':range(1,6,1)  SUHIIday ngt     31  CUHIIday    11 ngt   (1,100,10)
+RF_model_n_estimators = GridSearchCV(estimator = RandomForestRegressor(random_state=0),
+                            param_grid = param_n_estimators,cv=5).fit(Xtrain,Ytrain)
+
+#print('最佳结果参数设置为:\n',RF_model_n_estimators.best_params_)
+
+RF_model_n_estimators=RF_model_n_estimators.best_estimator_.fit(Xtrain,Ytrain)
+
+print('训练出来的气温最大值随机森林回归模型为：\n',RF_model_n_estimators)
+print('每个特征的重要性数值为：\n',RF_model_n_estimators.feature_importances_)
+
+pred_SATmax=RF_model_n_estimators.predict(Xtest)
+
+#模型精度评估
+#默认评估值R2
+print('测试数据集回归的默认评估值R2为：\n',RF_model_n_estimators.score(Xtest,Ytest))
+
+#进行归一化还原
+pred_SATmax=y_std_transformer.inverse_transform(pred_SATmax.reshape(1, -1)).reshape(-1, 1)
+Ytest=y_std_transformer.inverse_transform(Ytest.reshape(1, -1)).reshape(-1, 1)
+#均方误差MSE
+from sklearn.metrics import mean_squared_error
+print('测试数据集均方差为：\n',mean_squared_error(y_true=Ytest,y_pred=pred_SATmax))
+#平均绝对误差
+from sklearn.metrics import mean_absolute_error
+print('测试数据集平均绝对误差为：\n',mean_absolute_error(y_true=Ytest,y_pred=pred_SATmax))
+#中值绝对误差
+from sklearn.metrics import median_absolute_error
+print('测试数据集中值绝对误差为：\n',median_absolute_error(y_true=Ytest,y_pred=pred_SATmax))
